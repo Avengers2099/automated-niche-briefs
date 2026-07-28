@@ -1,0 +1,59 @@
+name: Publish daily brief
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 3 * * 1-5'
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  generate-and-publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fetch public trend data
+        run: python scripts/fetch_trends.py
+      - name: Generate original brief with Gemini
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          NICHE: ${{ vars.NICHE }}
+          AUDIENCE: ${{ vars.AUDIENCE }}
+          OFFER_NAME: ${{ vars.OFFER_NAME }}
+          PRICE_TEXT: ${{ vars.PRICE_TEXT }}
+        run: python scripts/generate_product.py
+      - name: Build static storefront
+        env:
+          RAZORPAY_PAYMENT_LINK: ${{ secrets.RAZORPAY_PAYMENT_LINK }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          NICHE: ${{ vars.NICHE }}
+          AUDIENCE: ${{ vars.AUDIENCE }}
+          OFFER_NAME: ${{ vars.OFFER_NAME }}
+          PRICE_TEXT: ${{ vars.PRICE_TEXT }}
+        run: python scripts/build_site.py
+      - name: Save editorial record
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data site
+          git diff --cached --quiet || git commit -m "Publish brief"
+          git push
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
